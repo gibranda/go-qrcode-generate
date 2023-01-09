@@ -1,0 +1,10 @@
+version: "3.3"
+
+services:
+  go-qrcode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: on-failure
+    ports:
+      - "3010:6611"
