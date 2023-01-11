@@ -2,6 +2,8 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -9,15 +11,32 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/rs/xid"
 	"github.com/skip2/go-qrcode"
+	qrsvg "github.com/wamuir/svg-qr-code"
+	"github.com/xuri/excelize/v2"
 )
 
 // Handler
 func hello(c echo.Context) error {
 	return c.String(http.StatusOK, "Hello, World!")
+}
+
+func downloadSVG(c echo.Context) error {
+	// Generate QRCode to SVG
+	qr, err := qrsvg.New("qrcode")
+	if err != nil {
+		panic(err)
+	}
+
+	// qr satisfies fmt.Stringer interface (or call qr.String() for a string)
+
+	svg := qr.String()
+
+	return c.JSON(http.StatusOK, svg)
 }
 
 func downloadPNG(c echo.Context) error {
@@ -53,6 +72,24 @@ func downloadPNG(c echo.Context) error {
 	return c.File("qrcode.zip")
 }
 
+func getExcelFile(c echo.Context) error {
+	c.Response().Header().Set("Content-Type", "application/octet-stream")
+	c.Response().Header().Set("Content-Disposition", "attachment; filename=qrcode-file.xlsx")
+	c.Response().Header().Set("Content-Transfer-Encoding", "binary")
+
+	excelFile, err := GenerateExcelFile()
+	if err != nil {
+		return c.String(http.StatusInternalServerError, err.Error())
+	}
+
+	var b bytes.Buffer
+	if err = excelFile.Write(&b); err != nil {
+		return c.String(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.Blob(http.StatusOK, "application/octet-stream", b.Bytes())
+}
+
 func main() {
 	// Echo instance
 	e := echo.New()
@@ -64,9 +101,11 @@ func main() {
 	// Routes
 	e.GET("/", hello)
 	e.GET("/download-png/:total", downloadPNG)
+	e.GET("/download-svg", downloadSVG)
+	e.GET("/download-excel", getExcelFile)
 
 	// Start server
-	e.Logger.Fatal(e.Start(":1717"))
+	e.Logger.Fatal(e.Start(":3010"))
 
 	// Generate QRCode to SVG
 	// qr, err := qrsvg.New(fileName)
@@ -76,6 +115,60 @@ func main() {
 
 	// // qr satisfies fmt.Stringer interface (or call qr.String() for a string)
 	// fmt.Println(qr.String())
+}
+
+func GenerateExcelFile() (*excelize.File, error) {
+	var (
+		uniqueIds []string
+	)
+
+	// Generate 5000 Unique UUIDs
+	for i := 0; i < 5000; i++ {
+		uniqueIds = append(uniqueIds, uuid.New().String())
+	}
+
+	excelFile := excelize.NewFile()
+	// Excel Headers / Titles
+	excelHeaders := map[string]string{
+		"A1": "Codes",
+	}
+
+	// Assign Excel Headers
+	for k, v := range excelHeaders {
+		excelFile.SetCellValue("Sheet1", k, v)
+	}
+
+	style, err := excelFile.NewStyle(&excelize.Style{
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"#FFFF00"}, Pattern: 1},
+		Font: &excelize.Font{Bold: true, Size: 13},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = excelFile.SetCellStyle("Sheet1", "A1", "A1", style)
+	if err != nil {
+		return nil, err
+	}
+
+	// Define Axis
+	axises := []string{"A"}
+
+	// Assign Values
+	axisSeq := 0
+	for k, value := range uniqueIds {
+		axisSeq = k + 2
+		for _, axis := range axises {
+			colName := fmt.Sprintf("%s%d", axis, axisSeq)
+
+			// Codes
+			if axis == "A" {
+				excelFile.SetCellValue("Sheet1", colName, value)
+			}
+		}
+	}
+
+	return excelFile, nil
 }
 
 func RemoveGlob(path string) (err error) {
